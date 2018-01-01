@@ -1,4 +1,5 @@
 const assert = require('assert')
+const http = require('http')
 const request = require('request-promise')
 const errors = require('request-promise/errors')
 
@@ -6,7 +7,7 @@ function sendRequest (requestOptions) {
   requestOptions.resolveWithFullResponse = true
   requestOptions.simple = false
 
-  return request(requestOptions);
+  return request(requestOptions)
 }
 
 function checkResponseCode (requestOptions, requiredCode) {
@@ -35,15 +36,29 @@ function hasStoppedListening (url) {
     .then(() => false)
     .catch(response => response.error instanceof errors.RequestError)
     .finally(status => {
-      if (status == false) {
+      if (status === false) {
         throw new Error('cannot start listening if "autoStart" is false')
       }
     })
+}
+
+function startMockedApiServer (port) {
+  const server = http.createServer((request, response) => {
+    response.writeHead(202, { 'Content-Type': 'text/plain' })
+    response.end()
+  })
+
+  server.unref()
+
+  return new Promise((resolve, reject) => {
+    server.on('error', reject).listen(port, resolve)
+  })
 }
 
 module.exports = {
   sendRequest,
   checkResponseCode,
   hasStartedListening,
-  hasStoppedListening
+  hasStoppedListening,
+  startMockedApiServer
 }

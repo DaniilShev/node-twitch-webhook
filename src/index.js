@@ -168,7 +168,7 @@ class TwitchWebhook extends EventEmitter {
     }
     requestOptions.resolveWithFullResponse = true
     if (this._options.secret) {
-      let secret = crypto
+      const secret = crypto
         .createHmac('sha256', this._options.secret)
         .update(topic)
         .digest('hex')
@@ -237,7 +237,7 @@ class TwitchWebhook extends EventEmitter {
         break
       case 'unsubscribe':
         delete this._secrets[queries['hub.topic']] // Yes, it's needed by design
-      case "subscribe": // eslint-disable-line
+      case 'subscribe': // eslint-disable-line no-fallthrough
         response.writeHead(200, { 'Content-Type': 'text/plain' })
         response.end(queries['hub.challenge'])
 
@@ -295,7 +295,7 @@ class TwitchWebhook extends EventEmitter {
         request.headers['x-hub-signature'] &&
         request.headers['x-hub-signature'].split('=')[1]
 
-      if (!signature) {
+      if (!signature || !this._secrets[endpoint]) {
         response.writeHead(202, { 'Content-Type': 'text/plain' })
         response.end()
         return
@@ -326,13 +326,10 @@ class TwitchWebhook extends EventEmitter {
       }
 
       if (this._options.secret) {
-        let storedSign
-        if (this._secrets[endpoint]) {
-          storedSign = crypto
-            .createHmac('sha256', this._secrets[endpoint])
-            .update(body)
-            .digest('hex')
-        }
+        let storedSign = crypto
+          .createHmac('sha256', this._secrets[endpoint])
+          .update(body)
+          .digest('hex')
 
         if (storedSign !== signature) {
           response.writeHead(202, { 'Content-Type': 'text/plain' })

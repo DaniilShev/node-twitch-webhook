@@ -3,27 +3,29 @@ const errors = require('../src/errors')
 const helpers = require('./helpers')
 const assert = require('assert')
 const Promise = require('bluebird')
-const request = require('request-promise')
+const crypto = require('crypto')
 
-const client_id = process.env.CLIENT_ID
+const clientId = process.env.CLIENT_ID
 
-if (!client_id) {
+if (!clientId) {
   throw new Error('Twitch Client ID not provided')
 }
 
-const port = process.env.PORT || 9108
-const freePort = port + 1
-const timeout = 10 * 1000
+const callback = process.env.CALLBACK || 'https://216.58.210.174/' // Google IP :)
 
-const callback = process.env.CALLBACK || 'https://216.58.210.174/'
+let startPort = process.env.PORT || 9108
+const port = startPort++
+const apiPort = startPort++
+const freePort = startPort++
+const timeout = 10 * 1000
 
 describe('TwitchWebhook', () => {
   let twitchWebhook
   let offlineWebhook
 
-  before(() => {
+  before((done) => {
     twitchWebhook = new TwitchWebhook({
-      client_id,
+      client_id: clientId,
       callback,
       listen: {
         host: '127.0.0.1',
@@ -32,7 +34,7 @@ describe('TwitchWebhook', () => {
     })
 
     offlineWebhook = new TwitchWebhook({
-      client_id,
+      client_id: clientId,
       callback,
       listen: {
         host: '127.0.0.1',
@@ -40,35 +42,40 @@ describe('TwitchWebhook', () => {
         autoStart: false
       }
     })
+
+    twitchWebhook.once('listening', done)
+  })
+
+  before(() => {
+    return helpers.startMockedApiServer(apiPort)
   })
 
   it('should contain errors', (done) => {
-    assert(twitchWebhook.errors instanceof Object);
+    assert(twitchWebhook.errors instanceof Object)
     done()
   })
 
   it('should throw FatalError if the Twitch Client ID is not provided', (done) => {
     try {
-      let testWebhook = new TwitchWebhook();
+      const testWebhook = new TwitchWebhook() // eslint-disable-line no-unused-vars
       done(new Error('expected error'))
     } catch (err) {
-      assert(err instanceof errors.FatalError);
+      assert(err instanceof errors.FatalError)
       done()
     }
   })
 
   it('should throw FatalError if the Callback URL is not provided', (done) => {
     try {
-      let testWebhook = new TwitchWebhook({
-        client_id
-      });
+      const testWebhook = new TwitchWebhook({ // eslint-disable-line no-unused-vars
+        clientId
+      })
       done(new Error('expected error'))
     } catch (err) {
-      assert(err instanceof errors.FatalError);
+      assert(err instanceof errors.FatalError)
       done()
     }
   })
-
 
   it('should automaticaly start listening by default', () => {
     assert.equal(twitchWebhook.isListening(), true)
@@ -156,7 +163,7 @@ describe('TwitchWebhook', () => {
         )
       })
 
-      it('returns 202 error code if topic is missing', () => {
+      it('returns 202 response code if topic is missing', () => {
         return helpers.checkResponseCode(
           {
             url: `http://127.0.0.1:${port}`,
@@ -166,7 +173,7 @@ describe('TwitchWebhook', () => {
         )
       })
 
-      it('returns 202 error code if topic is incorrect', () => {
+      it('returns 202 response code if topic is incorrect', () => {
         return helpers.checkResponseCode(
           {
             url: `http://127.0.0.1:${port}`,
@@ -192,6 +199,93 @@ describe('TwitchWebhook', () => {
           200
         )
       })
+
+      describe('secret support', () => {
+        let secureWebhook
+        const secret = 'test secret :)'
+
+        before((done) => {
+          secureWebhook = new TwitchWebhook({
+            client_id: clientId,
+            callback,
+            secret,
+            listen: {
+              host: '127.0.0.1',
+              port: freePort
+            },
+            baseApiUrl: `http://127.0.0.1:${apiPort}/`
+          })
+
+          secureWebhook.once('listening', done)
+        })
+
+        it('returns 202 response code if "x-hub-signature" header is missing', () => {
+          return helpers.checkResponseCode(
+            {
+              url: `http://127.0.0.1:${freePort}`,
+              method: 'POST',
+              headers: {
+                link: `<http://127.0.0.1:${apiPort}/users/follows?to_id=1337>; rel="self"`
+              }
+            },
+            202
+          )
+        })
+
+        it('returns 202 response code if "x-hub-signature" header is incorrect', () => {
+          return helpers.checkResponseCode(
+            {
+              url: `http://127.0.0.1:${freePort}`,
+              method: 'POST',
+              headers: {
+                link: `<http://127.0.0.1:${apiPort}/users/follows?to_id=1337>; rel="self"`,
+                'x-hub-signature': 'text'
+              }
+            },
+            202
+          )
+        })
+
+        it('returns 200 response code if everything is ok', () => {
+          // first step
+          const storedSign = crypto
+            .createHmac('sha256', secret)
+            .update(`http://127.0.0.1:${apiPort}/users/follows?to_id=1337`)
+            .digest('hex')
+
+          // second step
+          const body = JSON.stringify({
+            test: true
+          })
+          const signature = crypto
+            .createHmac('sha256', storedSign)
+            .update(body)
+            .digest('hex')
+
+          return secureWebhook.subscribe('users/follows', {
+            to_id: 1337
+          }).catch((err) => {
+            throw new Error('unexpected error in #subscribe: ' + err.message)
+          }).then(() => {
+            return helpers.checkResponseCode(
+              {
+                url: `http://127.0.0.1:${freePort}`,
+                method: 'POST',
+                headers: {
+                  link: `<http://127.0.0.1:${apiPort}/users/follows?to_id=1337>; rel="self"`,
+                  'x-hub-signature': 'sha256=' + signature
+                },
+                body
+              },
+              200
+            )
+          })
+        })
+
+        after(() => {
+          return secureWebhook.close()
+        })
+      })
     })
 
     it('only accepts POST and GET methods', () => {
@@ -215,7 +309,7 @@ describe('TwitchWebhook', () => {
         'denied',
         () => done()
       )
-      
+
       helpers.sendRequest(
         {
           url: `http://127.0.0.1:${port}`,
@@ -225,15 +319,12 @@ describe('TwitchWebhook', () => {
             'hub.reason': 'unauthorized'
           }
         }
-      );
+      )
     })
 
     it('emits "subscribe" event if the subscribe request was received', (done) => {
-      twitchWebhook.once(
-        'subscribe',
-        () => done()
-      )
-      
+      twitchWebhook.once('subscribe', () => done())
+
       helpers.sendRequest(
         {
           url: `http://127.0.0.1:${port}`,
@@ -244,15 +335,12 @@ describe('TwitchWebhook', () => {
             'hub.challenge': 'HzSGH_h04Cgl6VbDJm7IyXSNSlrhaLvBi9eft3bw'
           }
         }
-      );
+      )
     })
 
     it('emits "unsubscribe" event if the unsubscribe request was received', (done) => {
-      twitchWebhook.once(
-        'unsubscribe',
-        () => done()
-      )
-      
+      twitchWebhook.once('unsubscribe', () => done())
+
       helpers.sendRequest(
         {
           url: `http://127.0.0.1:${port}`,
@@ -263,14 +351,11 @@ describe('TwitchWebhook', () => {
             'hub.challenge': 'HzSGH_h04Cgl6VbDJm7IyXSNSlrhaLvBi9eft3bw'
           }
         }
-      );
+      )
     })
 
     it('emits "*" event if request with topic was received', (done) => {
-      twitchWebhook.once(
-        '*',
-        () => done()
-      )
+      twitchWebhook.once('*', () => done())
 
       helpers.sendRequest(
         {
@@ -300,14 +385,14 @@ describe('TwitchWebhook', () => {
             link: '<https://api.twitch.tv/helix/users/follows?to_id=1337>; rel="self"'
           },
           json: {
-            id: "436c70bb-a52f-4a6a-b4cc-6c57bc2ad227",
-            topic: "https://api.twitch.tv/helix/users/follows?to_id=1337",
-            type: "create",
+            id: '436c70bb-a52f-4a6a-b4cc-6c57bc2ad227',
+            topic: 'https://api.twitch.tv/helix/users/follows?to_id=1337',
+            type: 'create',
             data: {
-                from_id: 1336,
-                to_id: 1337
+              from_id: 1336,
+              to_id: 1337
             },
-            timestamp: "2017-08-07T13:52:14.403795077Z"
+            timestamp: '2017-08-07T13:52:14.403795077Z'
           }
         },
         200
@@ -319,7 +404,7 @@ describe('TwitchWebhook', () => {
         for (let stream of event.data) {
           assert(stream['started_at'] instanceof Date)
         }
-      
+
         done()
       })
 
@@ -341,12 +426,12 @@ describe('TwitchWebhook', () => {
               'viewer_count': 417,
               'started_at': '2017-12-01T10:09:45Z',
               language: 'en',
-              'thumbnail_url': 'https://link/to/thumbnail.jpg',
+              'thumbnail_url': 'https://link/to/thumbnail.jpg'
             }]
           }
         }
       )
-    })        
+    })
   })
 
   describe('#listen', () => {
