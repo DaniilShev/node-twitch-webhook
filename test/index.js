@@ -167,6 +167,38 @@ describe('TwitchWebhook', () => {
     })
   })
 
+  describe('events', () => {
+    it('emits "denied" event if request with denied status was received', (done) => {
+      twitchWebhook.on(
+        'denied',
+        done
+      )
+      
+      sendRequest(
+        {
+          url: `http://127.0.0.1:${port}`,
+          qs: {
+            'hub.mode': 'denied',
+            'hub.topic': 'https://api.twitch.tv/helix/users/follows?to_id=1337',
+            'hub.reason': 'unauthorized'
+          }
+        }
+      );
+    })
+
+    it('emits "subscribe" event if the subscribe request was received', () => {
+      
+    })
+
+    it('emits "unsubscribe" event if the unsubscribe request was received', () => {
+      
+    })
+
+    it('emits "*" event if request with topic was received', () => {
+      
+    })
+  })
+
   describe('#listen', () => {
     afterEach(() => offlineWebhook.close())
 
