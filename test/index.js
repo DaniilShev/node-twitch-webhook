@@ -42,6 +42,29 @@ describe('TwitchWebhook', () => {
     })
   })
 
+  it('should throw FatalError if the Twitch Client ID is not provided', (done) => {
+    try {
+      let testWebhook = new TwitchWebhook();
+      done(new Error('expected error'))
+    } catch (err) {
+      assert(err instanceof errors.FatalError);
+      done()
+    }
+  })
+
+  it('should throw FatalError if the Callback URL is not provided', (done) => {
+    try {
+      let testWebhook = new TwitchWebhook({
+        client_id
+      });
+      done(new Error('expected error'))
+    } catch (err) {
+      assert(err instanceof errors.FatalError);
+      done()
+    }
+  })
+
+
   it('should automaticaly start listening by default', () => {
     assert.equal(twitchWebhook.isListening(), true)
     return helpers.hasStartedListening(`http://127.0.0.1:${port}`)
@@ -96,7 +119,7 @@ describe('TwitchWebhook', () => {
             )
             .then(response => {
               if (!response.body) {
-                throw new Error('expeced "hub.challenge"')
+                throw new Error('expected "hub.challenge"')
               }
             })
         })
@@ -169,12 +192,12 @@ describe('TwitchWebhook', () => {
 
   describe('events', () => {
     it('emits "denied" event if request with denied status was received', (done) => {
-      twitchWebhook.on(
+      twitchWebhook.once(
         'denied',
-        done
+        () => done()
       )
       
-      sendRequest(
+      helpers.sendRequest(
         {
           url: `http://127.0.0.1:${port}`,
           qs: {
@@ -186,16 +209,59 @@ describe('TwitchWebhook', () => {
       );
     })
 
-    it('emits "subscribe" event if the subscribe request was received', () => {
+    it('emits "subscribe" event if the subscribe request was received', (done) => {
+      twitchWebhook.once(
+        'subscribe',
+        () => done()
+      )
       
+      helpers.sendRequest(
+        {
+          url: `http://127.0.0.1:${port}`,
+          qs: {
+            'hub.mode': 'subscribe',
+            'hub.topic': 'https://api.twitch.tv/helix/users/follows?to_id=1337',
+            'hub.lease_seconds': 864000,
+            'hub.challenge': 'HzSGH_h04Cgl6VbDJm7IyXSNSlrhaLvBi9eft3bw'
+          }
+        }
+      );
     })
 
-    it('emits "unsubscribe" event if the unsubscribe request was received', () => {
+    it('emits "unsubscribe" event if the unsubscribe request was received', (done) => {
+      twitchWebhook.once(
+        'unsubscribe',
+        () => done()
+      )
       
+      helpers.sendRequest(
+        {
+          url: `http://127.0.0.1:${port}`,
+          qs: {
+            'hub.mode': 'unsubscribe',
+            'hub.topic': 'https://api.twitch.tv/helix/users/follows?to_id=1337',
+            'hub.lease_seconds': 864000,
+            'hub.challenge': 'HzSGH_h04Cgl6VbDJm7IyXSNSlrhaLvBi9eft3bw'
+          }
+        }
+      );
     })
 
-    it('emits "*" event if request with topic was received', () => {
-      
+    it('emits "*" event if request with topic was received', (done) => {
+      twitchWebhook.once(
+        '*',
+        () => done()
+      )
+
+      helpers.sendRequest(
+        {
+          url: `http://127.0.0.1:${port}`,
+          method: 'POST',
+          json: {
+            topic: 'https://api.twitch.tv/helix/users/follows?to_id=1337'
+          }
+        }
+      )
     })
   })
 
@@ -260,6 +326,28 @@ describe('TwitchWebhook', () => {
       return twitchWebhook.unsubscribe('streams', {
         user_id: 123
       })
+    })
+
+    it('should return nothing if everything is ok', function () {
+      this.timeout(timeout)
+
+      return twitchWebhook.unsubscribe('streams', {
+        user_id: 123
+      })
+    })
+
+    it('should not supplement link if topic url is absolute', function () {
+      this.timeout(timeout)
+
+      return twitchWebhook.unsubscribe('https://api.twitch.tv/helix/streams', {
+        user_id: 123
+      })
+    })
+
+    it('should not supplement link if topic options is not exists', function () {
+      this.timeout(timeout)
+
+      return twitchWebhook.unsubscribe('https://api.twitch.tv/helix/streams?user_id=123')
     })
   })
 
