@@ -322,10 +322,13 @@ class TwitchWebhook extends EventEmitter {
       }
 
       if (this._options.secret) {
-        const storedSign = crypto
-          .createHmac('sha256', this._secrets[endpoint])
-          .update(body)
-          .digest('hex')
+        let storedSign
+        if (this._secrets[endpoint]) {
+          storedSign = crypto
+            .createHmac('sha256', this._secrets[endpoint])
+            .update(body)
+            .digest('hex')
+        }
 
         if (storedSign !== signature) {
           response.writeHead(202, { 'Content-Type': 'text/plain' })
