@@ -171,8 +171,8 @@ describe('TwitchWebhook', () => {
           {
             url: `http://127.0.0.1:${port}`,
             method: 'POST',
-            json: {
-              topic: 'https://api.twitch.tv/helix/'
+            headers: {
+              link: '<https://api.twitch.tv/helix/>; rel="self"'
             }
           },
           202
@@ -184,9 +184,10 @@ describe('TwitchWebhook', () => {
           {
             url: `http://127.0.0.1:${port}`,
             method: 'POST',
-            json: {
-              topic: 'https://api.twitch.tv/helix/users/follows?to_id=1337'
-            }
+            headers: {
+              link: '<https://api.twitch.tv/helix/users/follows?to_id=1337>; rel="self"'
+            },
+            json: {}
           },
           200
         )
@@ -275,12 +276,77 @@ describe('TwitchWebhook', () => {
         {
           url: `http://127.0.0.1:${port}`,
           method: 'POST',
-          json: {
-            topic: 'https://api.twitch.tv/helix/users/follows?to_id=1337'
-          }
+          headers: {
+            link: '<https://api.twitch.tv/helix/test>; rel="self"'
+          },
+          json: {}
         }
       )
     })
+  })
+
+  describe('date fix', () => {
+    it('should fix "timestamp" field in "users/follows" topic', (done) => {
+      twitchWebhook.once('users/follows', ({event}) => {
+        assert(event.timestamp instanceof Date)
+        done()
+      })
+
+      helpers.sendRequest(
+        {
+          url: `http://127.0.0.1:${port}`,
+          method: 'POST',
+          headers: {
+            link: '<https://api.twitch.tv/helix/users/follows?to_id=1337>; rel="self"'
+          },
+          json: {
+            id: "436c70bb-a52f-4a6a-b4cc-6c57bc2ad227",
+            topic: "https://api.twitch.tv/helix/users/follows?to_id=1337",
+            type: "create",
+            data: {
+                from_id: 1336,
+                to_id: 1337
+            },
+            timestamp: "2017-08-07T13:52:14.403795077Z"
+          }
+        },
+        200
+      )
+    })
+
+    it('should fix "started_at" fields in "streams" topic', (done) => {
+      twitchWebhook.once('streams', ({event}) => {
+        for (let stream of event.data) {
+          assert(stream['started_at'] instanceof Date)
+        }
+      
+        done()
+      })
+
+      helpers.sendRequest(
+        {
+          url: `http://127.0.0.1:${port}`,
+          method: 'POST',
+          headers: {
+            link: '<https://api.twitch.tv/helix/streams?user_id=5678>; rel="self"'
+          },
+          json: {
+            data: [{
+              id: '0123456789',
+              user_id: 5678,
+              game_id: 21779,
+              community_ids: [],
+              type: 'live',
+              title: 'Best Stream Ever',
+              'viewer_count': 417,
+              'started_at': '2017-12-01T10:09:45Z',
+              language: 'en',
+              'thumbnail_url': 'https://link/to/thumbnail.jpg',
+            }]
+          }
+        }
+      )
+    })        
   })
 
   describe('#listen', () => {
