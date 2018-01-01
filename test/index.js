@@ -42,6 +42,11 @@ describe('TwitchWebhook', () => {
     })
   })
 
+  it('should contain errors', (done) => {
+    assert(twitchWebhook.errors instanceof Object);
+    done()
+  })
+
   it('should throw FatalError if the Twitch Client ID is not provided', (done) => {
     try {
       let testWebhook = new TwitchWebhook();
@@ -156,6 +161,19 @@ describe('TwitchWebhook', () => {
           {
             url: `http://127.0.0.1:${port}`,
             method: 'POST'
+          },
+          202
+        )
+      })
+
+      it('returns 202 error code if topic is incorrect', () => {
+        return helpers.checkResponseCode(
+          {
+            url: `http://127.0.0.1:${port}`,
+            method: 'POST',
+            json: {
+              topic: 'https://api.twitch.tv/helix/'
+            }
           },
           202
         )
@@ -297,34 +315,12 @@ describe('TwitchWebhook', () => {
     })
   })
 
-  describe.skip('#subscribe', () => {})
-
   describe('#unsubscribe', () => {
-    it('should throw FatalError if the request status is bad', function () {
+    it('should throw RequestDenied if the request status is bad', function () {
       this.timeout(timeout)
 
       return twitchWebhook.unsubscribe('streams').catch(err => {
-        assert(err instanceof errors.FatalError)
-      })
-    })
-
-    it('should throw RequestDenied if request status is denied', function () {
-      this.timeout(timeout)
-
-      return twitchWebhook
-        .unsubscribe('streams', {
-          user_id: 123
-        })
-        .catch(err => {
-          assert(err instanceof errors.RequestDenied)
-        })
-    })
-
-    it('should return nothing if everything is ok', function () {
-      this.timeout(timeout)
-
-      return twitchWebhook.unsubscribe('streams', {
-        user_id: 123
+        assert(err instanceof errors.RequestDenied)
       })
     })
 
@@ -348,6 +344,48 @@ describe('TwitchWebhook', () => {
       this.timeout(timeout)
 
       return twitchWebhook.unsubscribe('https://api.twitch.tv/helix/streams?user_id=123')
+    })
+  })
+
+  describe('#subscribe', () => {
+    it('should throw RequestDenied if the request status is bad', function () {
+      this.timeout(timeout)
+
+      return twitchWebhook.subscribe('streams').catch(err => {
+        assert(err instanceof errors.RequestDenied)
+      })
+    })
+
+    it('should return nothing if everything is ok', function () {
+      this.timeout(timeout)
+
+      return twitchWebhook.subscribe('streams', {
+        user_id: 123
+      }).then(() => {
+        return twitchWebhook.unsubscribe('streams', {
+          user_id: 123
+        })
+      })
+    })
+
+    it('should not supplement link if topic url is absolute', function () {
+      this.timeout(timeout)
+
+      return twitchWebhook.subscribe('https://api.twitch.tv/helix/streams', {
+        user_id: 123
+      }).then(() => {
+        return twitchWebhook.unsubscribe('https://api.twitch.tv/helix/streams', {
+          user_id: 123
+        })
+      })
+    })
+
+    it('should not supplement link if topic options is not exists', function () {
+      this.timeout(timeout)
+
+      return twitchWebhook.subscribe('streams?user_id=123').then(() => {
+        return twitchWebhook.unsubscribe('streams?user_id=123')
+      })
     })
   })
 

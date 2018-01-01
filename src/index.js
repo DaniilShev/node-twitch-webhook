@@ -80,11 +80,12 @@ class TwitchWebhook extends EventEmitter {
    * Start listening for connections
    *
    * @param {...any} [args] - Arguments
+   * @throws {Promise<FatalError>} If listening is already started
    * @return {Promise}
    */
   listen (...args) {
     if (this.isListening()) {
-      return Promise.reject(new errors.FatalError('Listen already started'))
+      return Promise.reject(new errors.FatalError('Listening is already started'))
     }
 
     return new Promise(resolve => {
@@ -138,6 +139,7 @@ class TwitchWebhook extends EventEmitter {
    * unsubscribe from.
    * @param {string} topic - Topic name
    * @param {Object} options - Topic options
+   * @throws {Promise<RequestDenied>} If the hub finds any errors in the request
    * @return {Promise}
    */
   _request (mode, topic, options) {
@@ -172,13 +174,9 @@ class TwitchWebhook extends EventEmitter {
     return request
       .post(requestOptions)
       .catch(err => {
-        throw new errors.FatalError(err)
+        throw new errors.RequestDenied(err)
       })
       .then(response => {
-        if (response.statusCode !== 202) {
-          throw new errors.RequestDenied(response)
-        }
-
         if (this._options.secret) {
           this._secrets[topic] = requestOptions.qs['hub.secret']
         }
@@ -190,6 +188,8 @@ class TwitchWebhook extends EventEmitter {
    *
    * @param {string} topic - Topic name
    * @param {Object} options - Topic options
+   * @throws {RequestDenied} If hub finds any errors in the request
+   * @return {Promise}
    */
   subscribe (topic, options = {}) {
     return this._request('subscribe', topic, options)
@@ -199,6 +199,7 @@ class TwitchWebhook extends EventEmitter {
    * Unsubscribe from specific topic
    *
    * @param {string} topic - Topic name
+   * @throws {RequestDenied} If hub finds any errors in the request
    * @return {Promise}
    */
   unsubscribe (topic, options = {}) {
