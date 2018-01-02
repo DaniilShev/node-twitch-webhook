@@ -13,23 +13,28 @@ if (!clientId) {
 
 const callback = process.env.CALLBACK || 'https://216.58.210.174/' // Google IP :)
 
-let startPort = process.env.PORT || 9108
-const port = startPort++
-const apiPort = startPort++
-const freePort = startPort++
+let defaultPort = process.env.PORT || 9108
+const webhookPort = defaultPort++
+const testPort = defaultPort++
+const securePort = defaultPort++
+const apiPort = defaultPort++
+const offlinePort = defaultPort++
 const timeout = 10 * 1000
+const secret = 'test secret :)'
 
 describe('TwitchWebhook', () => {
   let twitchWebhook
+  let testWebhook
+  let secureWebhook
   let offlineWebhook
 
-  before((done) => {
+  before(() => {
     twitchWebhook = new TwitchWebhook({
       client_id: clientId,
       callback,
       listen: {
         host: '127.0.0.1',
-        port
+        port: webhookPort
       }
     })
 
@@ -38,53 +43,80 @@ describe('TwitchWebhook', () => {
       callback,
       listen: {
         host: '127.0.0.1',
-        port: freePort,
+        port: offlinePort,
         autoStart: false
       }
     })
-
-    twitchWebhook.once('listening', done)
   })
 
   before(() => {
     return helpers.startMockedApiServer(apiPort)
+      .then(() => {
+        testWebhook = new TwitchWebhook({
+          client_id: clientId,
+          callback,
+          listen: {
+            host: '127.0.0.1',
+            port: testPort
+          },
+          baseApiUrl: `http://127.0.0.1:${apiPort}/`
+        })
+
+        secureWebhook = new TwitchWebhook({
+          client_id: clientId,
+          callback,
+          secret,
+          listen: {
+            host: '127.0.0.1',
+            port: securePort
+          },
+          baseApiUrl: `http://127.0.0.1:${apiPort}/`
+        })
+      })
   })
 
   it('should contain errors', (done) => {
     assert(twitchWebhook.errors instanceof Object)
+    assert(twitchWebhook.errors.FatalError === errors.FatalError)
+    assert(twitchWebhook.errors.RequestDenied === errors.RequestDenied)
     done()
   })
 
   it('should throw FatalError if the Twitch Client ID is not provided', (done) => {
     try {
-      const testWebhook = new TwitchWebhook() // eslint-disable-line no-unused-vars
+      new TwitchWebhook({ // eslint-disable-line no-new
+        listen: false
+      })
       done(new Error('expected error'))
     } catch (err) {
       assert(err instanceof errors.FatalError)
+      assert(err.message === 'Twitch Client ID not provided!')
       done()
     }
   })
 
   it('should throw FatalError if the Callback URL is not provided', (done) => {
     try {
-      const testWebhook = new TwitchWebhook({ // eslint-disable-line no-unused-vars
-        clientId
+      new TwitchWebhook({ // eslint-disable-line no-new
+        client_id: clientId,
+        listen: false
       })
       done(new Error('expected error'))
     } catch (err) {
       assert(err instanceof errors.FatalError)
+      assert(err.message === 'Callback URL not provided!')
       done()
     }
   })
 
   it('should automaticaly start listening by default', () => {
     assert.equal(twitchWebhook.isListening(), true)
-    return helpers.hasStartedListening(`http://127.0.0.1:${port}`)
+    return helpers.hasStartedListening(`http://127.0.0.1:${webhookPort}`)
   })
 
   it('should not automaticaly start listening if "autoStart" is false', () => {
     assert.equal(offlineWebhook.isListening(), false)
-    return helpers.hasStoppedListening(`http://127.0.0.1:${freePort}`)
+    return helpers.hasStoppedListening(`http://127.0.0.1:${offlinePort}`)
   })
 
   describe('webhook', () => {
@@ -92,81 +124,54 @@ describe('TwitchWebhook', () => {
       it('returns 400 error code if the request is malformed', () => {
         return helpers.checkResponseCode(
           {
-            url: `http://127.0.0.1:${port}`
+            url: `http://127.0.0.1:${testPort}`
           },
           400
         )
       })
 
-      it('returns 200 response code if request with denied status was received', () => {
+      it('returns 200 response code if "hub.mode" query is "denied"', () => {
         return helpers.checkResponseCode(
           {
-            url: `http://127.0.0.1:${port}`,
+            url: `http://127.0.0.1:${testPort}`,
             qs: {
-              'hub.mode': 'denied',
-              'hub.topic': 'https://api.twitch.tv/helix/users/follows?to_id=1337',
-              'hub.reason': 'unauthorized'
+              'hub.mode': 'denied'
             }
           },
           200
         )
       })
 
-      it('returns 200 response code and "hub.challenge" if the subscribe or unsubscribe request was received', () => {
+      it('returns 200 response code and "hub.challenge" if "hub.mode" query is "subscribe" or "unsubscribe"', () => {
         const modes = ['subscribe', 'unsubscribe']
+        const challenge = 'HzSGH_h04Cgl6VbDJm7IyXSNSlrhaLvBi9eft3bw'
 
         return Promise.each(modes, mode => {
-          return helpers
-            .checkResponseCode(
+          return helpers.checkResponseCode(
             {
-              url: `http://127.0.0.1:${port}`,
+              url: `http://127.0.0.1:${testPort}`,
               qs: {
                 'hub.mode': mode,
-                'hub.topic': 'https://api.twitch.tv/helix/users/follows?to_id=1337',
-                'hub.lease_seconds': 864000,
-                'hub.challenge': 'HzSGH_h04Cgl6VbDJm7IyXSNSlrhaLvBi9eft3bw'
+                'hub.challenge': challenge
               }
             },
-              200
-            )
-            .then(response => {
-              if (!response.body) {
-                throw new Error('expected "hub.challenge"')
-              }
-            })
+            200
+          ).then(response => {
+            if (!response.body) {
+              throw new Error('expected "hub.challenge"')
+            }
+
+            assert(response.body, challenge)
+          })
         })
       })
     })
 
     describe('POST method', () => {
-      it('returns 202 response code if data is very large', () => {
-        const largeText = '0'.repeat(1e7)
-
-        return helpers.checkResponseCode(
-          {
-            url: `http://127.0.0.1:${port}`,
-            method: 'POST',
-            body: largeText
-          },
-          202
-        )
-      })
-
-      it('returns 202 response code if json is malformed', () => {
-        return helpers.checkResponseCode(
-          {
-            url: `http://127.0.0.1:${port}`,
-            method: 'POST',
-            body: 'text,'
-          },
-          202
-        )
-      })
-
       it('returns 202 response code if topic is missing', () => {
         return helpers.checkResponseCode(
           {
-            url: `http://127.0.0.1:${port}`,
+            url: `http://127.0.0.1:${testPort}`,
             method: 'POST'
           },
           202
@@ -176,11 +181,41 @@ describe('TwitchWebhook', () => {
       it('returns 202 response code if topic is incorrect', () => {
         return helpers.checkResponseCode(
           {
-            url: `http://127.0.0.1:${port}`,
+            url: `http://127.0.0.1:${testPort}`,
             method: 'POST',
             headers: {
-              link: '<https://api.twitch.tv/helix/>; rel="self"'
+              link: `<http://127.0.0.1:${apiPort}/>; rel="self"`
             }
+          },
+          202
+        )
+      })
+
+      it('returns 202 response code if request is very large', () => {
+        const largeText = '0'.repeat(1e7)
+
+        return helpers.checkResponseCode(
+          {
+            url: `http://127.0.0.1:${testPort}`,
+            method: 'POST',
+            headers: {
+              link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`
+            },
+            body: largeText
+          },
+          202
+        )
+      })
+
+      it('returns 202 response code if json is malformed', () => {
+        return helpers.checkResponseCode(
+          {
+            url: `http://127.0.0.1:${testPort}`,
+            method: 'POST',
+            headers: {
+              link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`
+            },
+            body: 'text,'
           },
           202
         )
@@ -189,10 +224,10 @@ describe('TwitchWebhook', () => {
       it('returns 200 response code if everything is ok', () => {
         return helpers.checkResponseCode(
           {
-            url: `http://127.0.0.1:${port}`,
+            url: `http://127.0.0.1:${testPort}`,
             method: 'POST',
             headers: {
-              link: '<https://api.twitch.tv/helix/users/follows?to_id=1337>; rel="self"'
+              link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`
             },
             json: {}
           },
@@ -201,31 +236,13 @@ describe('TwitchWebhook', () => {
       })
 
       describe('secret support', () => {
-        let secureWebhook
-        const secret = 'test secret :)'
-
-        before((done) => {
-          secureWebhook = new TwitchWebhook({
-            client_id: clientId,
-            callback,
-            secret,
-            listen: {
-              host: '127.0.0.1',
-              port: freePort
-            },
-            baseApiUrl: `http://127.0.0.1:${apiPort}/`
-          })
-
-          secureWebhook.once('listening', done)
-        })
-
         it('returns 202 response code if "x-hub-signature" header is missing', () => {
           return helpers.checkResponseCode(
             {
-              url: `http://127.0.0.1:${freePort}`,
+              url: `http://127.0.0.1:${securePort}`,
               method: 'POST',
               headers: {
-                link: `<http://127.0.0.1:${apiPort}/users/follows?to_id=1337>; rel="self"`
+                link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`
               }
             },
             202
@@ -235,12 +252,13 @@ describe('TwitchWebhook', () => {
         it('returns 202 response code if "x-hub-signature" header is incorrect', () => {
           return helpers.checkResponseCode(
             {
-              url: `http://127.0.0.1:${freePort}`,
+              url: `http://127.0.0.1:${securePort}`,
               method: 'POST',
               headers: {
-                link: `<http://127.0.0.1:${apiPort}/users/follows?to_id=1337>; rel="self"`,
-                'x-hub-signature': 'text'
-              }
+                link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`,
+                'x-hub-signature': 'sha256=text'
+              },
+              json: {}
             },
             202
           )
@@ -250,7 +268,7 @@ describe('TwitchWebhook', () => {
           // first step
           const storedSign = crypto
             .createHmac('sha256', secret)
-            .update(`http://127.0.0.1:${apiPort}/users/follows?to_id=1337`)
+            .update(`http://127.0.0.1:${apiPort}/test?param=value`)
             .digest('hex')
 
           // second step
@@ -262,17 +280,17 @@ describe('TwitchWebhook', () => {
             .update(body)
             .digest('hex')
 
-          return secureWebhook.subscribe('users/follows', {
-            to_id: 1337
+          return secureWebhook.subscribe('test', {
+            param: 'value'
           }).catch((err) => {
             throw new Error('unexpected error in #subscribe: ' + err.message)
           }).then(() => {
             return helpers.checkResponseCode(
               {
-                url: `http://127.0.0.1:${freePort}`,
+                url: `http://127.0.0.1:${securePort}`,
                 method: 'POST',
                 headers: {
-                  link: `<http://127.0.0.1:${apiPort}/users/follows?to_id=1337>; rel="self"`,
+                  link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`,
                   'x-hub-signature': 'sha256=' + signature
                 },
                 body
@@ -280,10 +298,6 @@ describe('TwitchWebhook', () => {
               200
             )
           })
-        })
-
-        after(() => {
-          return secureWebhook.close()
         })
       })
     })
@@ -294,7 +308,7 @@ describe('TwitchWebhook', () => {
       return Promise.each(methods, method => {
         return helpers.checkResponseCode(
           {
-            url: `http://127.0.0.1:${port}`,
+            url: `http://127.0.0.1:${testPort}`,
             method
           },
           405
@@ -305,68 +319,199 @@ describe('TwitchWebhook', () => {
 
   describe('events', () => {
     it('emits "denied" event if request with denied status was received', (done) => {
-      twitchWebhook.once(
-        'denied',
-        () => done()
-      )
+      let query = {
+        'hub.mode': 'denied'
+      }
+      testWebhook.once('denied', (obj) => {
+        assert(typeof obj === 'object')
+        assert.deepEqual(obj, query)
+        done()
+      })
 
-      helpers.sendRequest(
-        {
-          url: `http://127.0.0.1:${port}`,
-          qs: {
-            'hub.mode': 'denied',
-            'hub.topic': 'https://api.twitch.tv/helix/users/follows?to_id=1337',
-            'hub.reason': 'unauthorized'
-          }
-        }
-      )
+      helpers.sendRequest({
+        url: `http://127.0.0.1:${testPort}`,
+        qs: query
+      })
     })
 
     it('emits "subscribe" event if the subscribe request was received', (done) => {
-      twitchWebhook.once('subscribe', () => done())
+      let query = {
+        'hub.mode': 'subscribe',
+        'hub.challenge': 'HzSGH_h04Cgl6VbDJm7IyXSNSlrhaLvBi9eft3bw'
+      }
+      testWebhook.once('subscribe', (obj) => {
+        assert(typeof obj === 'object')
+        assert.deepEqual(obj, query)
+        done()
+      })
 
-      helpers.sendRequest(
-        {
-          url: `http://127.0.0.1:${port}`,
-          qs: {
-            'hub.mode': 'subscribe',
-            'hub.topic': 'https://api.twitch.tv/helix/users/follows?to_id=1337',
-            'hub.lease_seconds': 864000,
-            'hub.challenge': 'HzSGH_h04Cgl6VbDJm7IyXSNSlrhaLvBi9eft3bw'
-          }
-        }
-      )
+      helpers.sendRequest({
+        url: `http://127.0.0.1:${testPort}`,
+        qs: query
+      })
     })
 
     it('emits "unsubscribe" event if the unsubscribe request was received', (done) => {
-      twitchWebhook.once('unsubscribe', () => done())
+      let query = {
+        'hub.mode': 'unsubscribe',
+        'hub.challenge': 'HzSGH_h04Cgl6VbDJm7IyXSNSlrhaLvBi9eft3bw'
+      }
+      testWebhook.once('unsubscribe', (obj) => {
+        assert(typeof obj === 'object')
+        assert.deepEqual(obj, query)
+        done()
+      })
 
-      helpers.sendRequest(
-        {
-          url: `http://127.0.0.1:${port}`,
-          qs: {
-            'hub.mode': 'unsubscribe',
-            'hub.topic': 'https://api.twitch.tv/helix/users/follows?to_id=1337',
-            'hub.lease_seconds': 864000,
-            'hub.challenge': 'HzSGH_h04Cgl6VbDJm7IyXSNSlrhaLvBi9eft3bw'
-          }
-        }
-      )
+      helpers.sendRequest({
+        url: `http://127.0.0.1:${testPort}`,
+        qs: query
+      })
     })
 
     it('emits "*" event if request with topic was received', (done) => {
-      twitchWebhook.once('*', () => done())
+      const body = {
+        test: true
+      }
+      testWebhook.once('*', (obj) => {
+        assert(typeof obj === 'object')
+        assert(obj.topic === 'test')
+        assert(obj.endpoint === `http://127.0.0.1:${apiPort}/test?param=value`)
+        assert.deepEqual(obj.event, body)
+        done()
+      })
 
-      helpers.sendRequest(
-        {
-          url: `http://127.0.0.1:${port}`,
+      helpers.sendRequest({
+        url: `http://127.0.0.1:${testPort}`,
+        method: 'POST',
+        headers: {
+          link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`
+        },
+        json: body
+      })
+    })
+
+    it('emits event with the topic name if request with topic was received', (done) => {
+      const body = {
+        test: true
+      }
+      testWebhook.once('test', (obj) => {
+        assert(typeof obj === 'object')
+        assert(obj.topic === 'test')
+        assert(obj.endpoint === `http://127.0.0.1:${apiPort}/test?param=value`)
+        assert.deepEqual(obj.event, body)
+        done()
+      })
+
+      helpers.sendRequest({
+        url: `http://127.0.0.1:${testPort}`,
+        method: 'POST',
+        headers: {
+          link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`
+        },
+        json: body
+      })
+    })
+
+    describe('emits "webhook-error" event if incorrect request was received', () => {
+      it('should emit if topic is missing', (done) => {
+        testWebhook.once('webhook-error', (err) => {
+          assert(err instanceof errors.WebhookError)
+          assert(err.message === 'Topic is missing or incorrect')
+          done()
+        })
+
+        helpers.sendRequest({
+          url: `http://127.0.0.1:${testPort}`,
+          method: 'POST'
+        })
+      })
+
+      it('should emit if topic is incorrect', (done) => {
+        testWebhook.once('webhook-error', (err) => {
+          assert(err instanceof errors.WebhookError)
+          assert(err.message === 'Topic is missing or incorrect')
+          done()
+        })
+
+        helpers.sendRequest({
+          url: `http://127.0.0.1:${testPort}`,
           method: 'POST',
           headers: {
-            link: '<https://api.twitch.tv/helix/test>; rel="self"'
+            link: `<http://127.0.0.1:${apiPort}/>; rel="self"`
+          }
+        })
+      })
+
+      it('should emit if request is very large', (done) => {
+        const largeText = '0'.repeat(1e7)
+        testWebhook.once('webhook-error', (err) => {
+          assert(err instanceof errors.WebhookError)
+          assert(err.message === 'Request is very large')
+          done()
+        })
+
+        helpers.sendRequest({
+          url: `http://127.0.0.1:${testPort}`,
+          method: 'POST',
+          headers: {
+            link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`
           },
-          json: {}
-        }
-      )
+          body: largeText
+        })
+      })
+
+      it('should emit if json is malformed', (done) => {
+        testWebhook.once('webhook-error', (err) => {
+          assert(err instanceof errors.WebhookError)
+          assert(err.message === 'JSON is malformed')
+          done()
+        })
+
+        helpers.sendRequest({
+          url: `http://127.0.0.1:${testPort}`,
+          method: 'POST',
+          headers: {
+            link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`
+          },
+          body: 'text,'
+        })
+      })
+
+      describe('secret support', () => {
+        it('should emit if "x-hub-signature" header is missing', (done) => {
+          secureWebhook.once('webhook-error', (err) => {
+            assert(err instanceof errors.WebhookError)
+            assert(err.message === '"x-hub-signature" is missing')
+            done()
+          })
+
+          helpers.sendRequest({
+            url: `http://127.0.0.1:${securePort}`,
+            method: 'POST',
+            headers: {
+              link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`
+            }
+          })
+        })
+
+        it('should emit if "x-hub-signature" header is incorrect', (done) => {
+          secureWebhook.once('webhook-error', (err) => {
+            assert(err instanceof errors.WebhookError)
+            assert(err.message === '"x-hub-signature" is incorrect')
+            done()
+          })
+
+          helpers.sendRequest({
+            url: `http://127.0.0.1:${securePort}`,
+            method: 'POST',
+            headers: {
+              link: `<http://127.0.0.1:${apiPort}/test?param=value>; rel="self"`,
+              'x-hub-signature': 'sha256=text'
+            },
+            json: {}
+          })
+        })
+      })
     })
   })
 
@@ -377,26 +522,16 @@ describe('TwitchWebhook', () => {
         done()
       })
 
-      helpers.sendRequest(
-        {
-          url: `http://127.0.0.1:${port}`,
-          method: 'POST',
-          headers: {
-            link: '<https://api.twitch.tv/helix/users/follows?to_id=1337>; rel="self"'
-          },
-          json: {
-            id: '436c70bb-a52f-4a6a-b4cc-6c57bc2ad227',
-            topic: 'https://api.twitch.tv/helix/users/follows?to_id=1337',
-            type: 'create',
-            data: {
-              from_id: 1336,
-              to_id: 1337
-            },
-            timestamp: '2017-08-07T13:52:14.403795077Z'
-          }
+      helpers.sendRequest({
+        url: `http://127.0.0.1:${webhookPort}`,
+        method: 'POST',
+        headers: {
+          link: '<https://api.twitch.tv/helix/users/follows?to_id=1337>; rel="self"'
         },
-        200
-      )
+        json: {
+          timestamp: '2017-08-07T13:52:14.403795077Z'
+        }
+      })
     })
 
     it('should fix "started_at" fields in "streams" topic', (done) => {
@@ -408,29 +543,20 @@ describe('TwitchWebhook', () => {
         done()
       })
 
-      helpers.sendRequest(
-        {
-          url: `http://127.0.0.1:${port}`,
-          method: 'POST',
-          headers: {
-            link: '<https://api.twitch.tv/helix/streams?user_id=5678>; rel="self"'
-          },
-          json: {
-            data: [{
-              id: '0123456789',
-              user_id: 5678,
-              game_id: 21779,
-              community_ids: [],
-              type: 'live',
-              title: 'Best Stream Ever',
-              'viewer_count': 417,
-              'started_at': '2017-12-01T10:09:45Z',
-              language: 'en',
-              'thumbnail_url': 'https://link/to/thumbnail.jpg'
-            }]
-          }
+      helpers.sendRequest({
+        url: `http://127.0.0.1:${webhookPort}`,
+        method: 'POST',
+        headers: {
+          link: '<https://api.twitch.tv/helix/streams?user_id=5678>; rel="self"'
+        },
+        json: {
+          data: [{
+            'started_at': '2017-12-01T10:09:45Z'
+          }, {
+            'started_at': '2017-12-02T11:49:47Z'
+          }]
         }
-      )
+      })
     })
   })
 
@@ -438,8 +564,9 @@ describe('TwitchWebhook', () => {
     afterEach(() => offlineWebhook.close())
 
     it('should throw FatalError if the listener is already running', () => {
-      return twitchWebhook.listen(freePort).catch(err => {
+      return twitchWebhook.listen(offlinePort).catch(err => {
         assert(err instanceof errors.FatalError)
+        assert(err.message === 'Listening is already started')
       })
     })
 
@@ -448,7 +575,7 @@ describe('TwitchWebhook', () => {
     })
 
     it('starts listening with options', () => {
-      return offlineWebhook.listen(freePort)
+      return offlineWebhook.listen(offlinePort)
     })
   })
 
@@ -457,12 +584,12 @@ describe('TwitchWebhook', () => {
   describe('#isListening', () => {
     it('returns true if listening is started', () => {
       assert.equal(twitchWebhook.isListening(), true)
-      return helpers.hasStartedListening(`http://127.0.0.1:${port}`)
+      return helpers.hasStartedListening(`http://127.0.0.1:${webhookPort}`)
     })
 
     it('returns false if listening is not started', () => {
       assert.equal(offlineWebhook.isListening(), false)
-      return helpers.hasStoppedListening(`http://127.0.0.1:${freePort}`)
+      return helpers.hasStoppedListening(`http://127.0.0.1:${offlinePort}`)
     })
   })
 
@@ -541,6 +668,10 @@ describe('TwitchWebhook', () => {
   })
 
   after(() => {
-    return twitchWebhook.close()
+    return Promise.all([
+      twitchWebhook.close(),
+      secureWebhook.close(),
+      testWebhook.close()
+    ])
   })
 })

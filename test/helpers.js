@@ -47,7 +47,6 @@ function startMockedApiServer (port) {
     response.writeHead(202, { 'Content-Type': 'text/plain' })
     response.end()
   })
-
   server.unref()
 
   return new Promise((resolve, reject) => {
