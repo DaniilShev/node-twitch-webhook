@@ -121,14 +121,8 @@ class TwitchWebhook extends EventEmitter {
       return Promise.resolve()
     }
 
-    return new Promise((resolve, reject) => {
-      this._server.close(err => {
-        if (err) {
-          return reject(err)
-        }
-
-        return resolve()
-      })
+    return new Promise(resolve => {
+      this._server.close(() => resolve())
     })
   }
 
