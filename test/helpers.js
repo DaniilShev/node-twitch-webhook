@@ -42,8 +42,10 @@ function hasStoppedListening (url) {
     })
 }
 
-function startMockedApiServer (port) {
+let requests = []
+function startMockedServer (port) {
   const server = http.createServer((request, response) => {
+    requests.push(request.url)
     response.writeHead(202, { 'Content-Type': 'text/plain' })
     response.end()
   })
@@ -54,10 +56,17 @@ function startMockedApiServer (port) {
   })
 }
 
+function checkRequestToMockedServer (callback) {
+  if (requests.findIndex(callback) === -1) {
+    throw new Error('request does not exist')
+  }
+}
+
 module.exports = {
   sendRequest,
   checkResponseCode,
   hasStartedListening,
   hasStoppedListening,
-  startMockedApiServer
+  startMockedServer,
+  checkRequestToMockedServer
 }

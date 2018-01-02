@@ -4,6 +4,7 @@ const helpers = require('./helpers')
 const assert = require('assert')
 const Promise = require('bluebird')
 const crypto = require('crypto')
+const url = require('url')
 
 const clientId = process.env.CLIENT_ID
 
@@ -35,7 +36,8 @@ describe('TwitchWebhook', () => {
       listen: {
         host: '127.0.0.1',
         port: webhookPort
-      }
+      },
+      lease_seconds: 0
     })
 
     offlineWebhook = new TwitchWebhook({
@@ -45,12 +47,13 @@ describe('TwitchWebhook', () => {
         host: '127.0.0.1',
         port: offlinePort,
         autoStart: false
-      }
+      },
+      lease_seconds: 0
     })
   })
 
   before(() => {
-    return helpers.startMockedApiServer(apiPort)
+    return helpers.startMockedServer(apiPort)
       .then(() => {
         testWebhook = new TwitchWebhook({
           client_id: clientId,
@@ -110,13 +113,70 @@ describe('TwitchWebhook', () => {
   })
 
   it('should automaticaly start listening by default', () => {
-    assert.equal(twitchWebhook.isListening(), true)
+    assert(twitchWebhook.isListening())
     return helpers.hasStartedListening(`http://127.0.0.1:${webhookPort}`)
   })
 
   it('should not automaticaly start listening if "autoStart" is false', () => {
-    assert.equal(offlineWebhook.isListening(), false)
+    assert(offlineWebhook.isListening() === false)
     return helpers.hasStoppedListening(`http://127.0.0.1:${offlinePort}`)
+  })
+
+  it('should set "host" and "post" if one of them is undefined', (done) => {
+    const tempWebhook = new TwitchWebhook({
+      client_id: clientId,
+      callback,
+      lease_seconds: 0
+    })
+
+    tempWebhook.on('listening', () => {
+      helpers.hasStartedListening(`http://0.0.0.0:8443/`)
+      .then(() => done())
+      .catch(done)
+      .finally(() => tempWebhook.close())
+    })
+  })
+
+  it('should add trailing slash to base url of api if it does not exist', () => {
+    const tempWebhook = new TwitchWebhook({
+      client_id: clientId,
+      callback,
+      lease_seconds: 0,
+      baseApiUrl: `http://127.0.0.1:${apiPort}`
+    })
+
+    tempWebhook.subscribe('test')
+      .catch((err) => {
+        throw new Error('unexpected error in #subscribe: ' + err.message)
+      })
+      .then(() => {
+        helpers.checkRequestToMockedServer((element) => {
+          const params = url.parse(element, true).query
+          return params['hub.topic'] === `http://127.0.0.1:${apiPort}/test`
+        })
+      })
+      .finally(() => tempWebhook.close())
+  })
+
+  it('should add trailing slash to callback if it does not exist', () => {
+    const tempWebhook = new TwitchWebhook({
+      client_id: clientId,
+      callback: `http://127.0.0.1:${offlinePort}`,
+      lease_seconds: 0,
+      baseApiUrl: `http://127.0.0.1:${apiPort}`
+    })
+
+    tempWebhook.subscribe('test')
+      .catch((err) => {
+        throw new Error('unexpected error in #subscribe: ' + err.message)
+      })
+      .then(() => {
+        helpers.checkRequestToMockedServer((element) => {
+          const params = url.parse(element, true).query
+          return params['hub.callback'] === `http://127.0.0.1:${offlinePort}/`
+        })
+      })
+      .finally(() => tempWebhook.close())
   })
 
   describe('webhook', () => {
@@ -583,12 +643,12 @@ describe('TwitchWebhook', () => {
 
   describe('#isListening', () => {
     it('returns true if listening is started', () => {
-      assert.equal(twitchWebhook.isListening(), true)
+      assert(twitchWebhook.isListening())
       return helpers.hasStartedListening(`http://127.0.0.1:${webhookPort}`)
     })
 
     it('returns false if listening is not started', () => {
-      assert.equal(offlineWebhook.isListening(), false)
+      assert(offlineWebhook.isListening() === false)
       return helpers.hasStoppedListening(`http://127.0.0.1:${offlinePort}`)
     })
   })
@@ -599,6 +659,7 @@ describe('TwitchWebhook', () => {
 
       return twitchWebhook.unsubscribe('streams').catch(err => {
         assert(err instanceof errors.RequestDenied)
+        assert(typeof err.response === 'object')
       })
     })
 
@@ -631,6 +692,7 @@ describe('TwitchWebhook', () => {
 
       return twitchWebhook.subscribe('streams').catch(err => {
         assert(err instanceof errors.RequestDenied)
+        assert(typeof err.response === 'object')
       })
     })
 
@@ -639,10 +701,6 @@ describe('TwitchWebhook', () => {
 
       return twitchWebhook.subscribe('streams', {
         user_id: 123
-      }).then(() => {
-        return twitchWebhook.unsubscribe('streams', {
-          user_id: 123
-        })
       })
     })
 
@@ -651,27 +709,37 @@ describe('TwitchWebhook', () => {
 
       return twitchWebhook.subscribe('https://api.twitch.tv/helix/streams', {
         user_id: 123
-      }).then(() => {
-        return twitchWebhook.unsubscribe('https://api.twitch.tv/helix/streams', {
-          user_id: 123
-        })
       })
     })
 
     it('should not supplement link if topic options is not exists', function () {
       this.timeout(timeout)
 
-      return twitchWebhook.subscribe('streams?user_id=123').then(() => {
-        return twitchWebhook.unsubscribe('streams?user_id=123')
-      })
+      return twitchWebhook.subscribe('streams?user_id=123')
     })
   })
 
-  after(() => {
-    return Promise.all([
-      twitchWebhook.close(),
-      secureWebhook.close(),
-      testWebhook.close()
-    ])
+  after(function () {
+    if (twitchWebhook) {
+      return twitchWebhook.close()
+    } else {
+      this.skip()
+    }
+  })
+
+  after(function () {
+    if (secureWebhook) {
+      return secureWebhook.close()
+    } else {
+      this.skip()
+    }
+  })
+
+  after(function () {
+    if (testWebhook) {
+      return testWebhook.close()
+    } else {
+      this.skip()
+    }
   })
 })
