@@ -41,7 +41,7 @@ class RequestDenied extends FatalError {
    * @param {Object} response - Response
    */
   constructor (response) {
-    super(`Invalid response status code ${response.statusCode}`)
+    super(response)
 
     this.response = response
   }
