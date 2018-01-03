@@ -26,7 +26,7 @@ const twitchWebhook = new TwitchWebhook({
     client_id: 'Your Twitch Client ID',
     callback: 'Your Callback URL',
     secret: 'It\'s a secret', // default: false
-    lease_seconds: 259200,    // default: 864000 (also it maximum)
+    lease_seconds: 259200,    // default: 864000 (maximum value)
     listen: { 
         port: 8080,           // default: 8443
         host: '127.0.0.1',    // default: 0.0.0.0
@@ -49,7 +49,7 @@ twitchWebhook.on('users/follows', ({ topic, options, endpoint, event }) => {
 
 // subscribe to topic
 twitchWebhook.subscribe('users/follows', {
-    from_id: 12826 // ID of Twitch Chanell ¯\_(ツ)_/¯
+    from_id: 12826 // ID of Twitch Channel ¯\_(ツ)_/¯
 })
 
 // renew the subscription when it expires
@@ -57,8 +57,8 @@ twitchWebhook.on('unsubscibe', (obj) => {
   twitchWebhook.subscribe(obj['hub.topic'])
 })
 
-// tell twitch that we no longer listen
-// otherwise twitch will try to send events to a down app
+// tell Twitch that we no longer listen
+// otherwise it will try to send events to a down app
 process.on('SIGINT', () => {
   // unsubscribe from all topics
   twitchWebhook.unsubscribe('*')
