@@ -68,6 +68,8 @@ process.on('SIGINT', () => {
   twitchWebhook.unsubscribe('users/follows', {
     to_id: 12826
   })
+
+  process.exit(0)
 })
 ```
 

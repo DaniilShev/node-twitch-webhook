@@ -37,5 +37,9 @@ twitchWebhook.on('unsubscibe', (obj) => {
   twitchWebhook.subscribe(obj['hub.topic'])
 })
 
-// unsubscribe from all topics
-process.on('SIGINT', () => twitchWebhook.unsubscribe('*'))
+process.on('SIGINT', () => {
+  // unsubscribe from all topics
+  twitchWebhook.unsubscribe('*')
+
+  process.exit(0)
+})
