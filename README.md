@@ -28,12 +28,13 @@ const TwitchWebhook = require('twitch-webhook')
 const twitchWebhook = new TwitchWebhook({
     client_id: 'Your Twitch Client ID',
     callback: 'Your Callback URL',
-    secret: 'It\'s a secret', // default: false
-    lease_seconds: 259200,    // default: 864000 (maximum value)
+    access_token: 'Your access token', // default: null (ignored)
+    secret: 'It\'s a secret',          // default: false
+    lease_seconds: 259200,             // default: 864000 (maximum value)
     listen: {
-        port: 8080,           // default: 8443
-        host: '127.0.0.1',    // default: 0.0.0.0
-        autoStart: false      // default: true
+        port: 8080,                    // default: 8443
+        host: '127.0.0.1',             // default: 0.0.0.0
+        autoStart: false               // default: true
     }
 })
 

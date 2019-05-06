@@ -23,6 +23,7 @@ class TwitchWebhook extends EventEmitter {
    * will be delivered.
    * @param {string} [options.secret=false] - Secret used to sign
    * notification payloads.
+   * @param {string} [options.access_token] - Access token used to increase rate limit
    * @param {number} [options.lease_seconds=864000] - Number of seconds until
    * the subscription expires.
    * @param {boolean|Object} [options.listen] - Listen options
@@ -156,8 +157,14 @@ class TwitchWebhook extends EventEmitter {
 
     let requestOptions = {}
     requestOptions.url = this._hubUrl
-    requestOptions.headers = {
-      'Client-ID': this._options.client_id
+    if (this._options.access_token !== undefined) {
+      requestOptions.headers = {
+        'Authorization': `Bearer ${this._options.access_token}`
+      }
+    } else {
+      requestOptions.headers = {
+        'Client-ID': this._options.client_id
+      }
     }
     requestOptions.qs = {
       'hub.callback': this._options.callback,
